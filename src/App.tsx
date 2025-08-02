@@ -12,6 +12,7 @@ import { TranscriptPanel } from './components/TranscriptPanel';
 import { AnalysisCard } from './components/AnalysisCard';
 import { ChatPanel } from './components/ChatPanel';
 import { ExportDialog } from './components/ExportDialog';
+import { SessionManager } from './components/SessionManager';
 import { 
   MicIcon, 
   SummaryIcon, 
@@ -19,10 +20,15 @@ import {
   ListIcon, 
   BrainCircuitIcon, 
   HourglassIcon,
-  DownloadIcon
+  DownloadIcon,
+  HistoryIcon,
+  EditIcon,
+  PaletteIcon
 } from './components/icons';
 import { ThemeToggle } from './components/ThemeToggle';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { AdvancedTranscriptEditor } from './components/AdvancedTranscriptEditor';
+import { ThemePreview } from './components/ThemePreview';
 
 const ASSEMBLYAI_API_KEY = import.meta.env.VITE_ASSEMBLYAI_API_KEY || "";
 
@@ -35,32 +41,39 @@ const AppContent: React.FC = () => {
   const [isChatting, setIsChatting] = useState(false);
   const [chatEnabled, setChatEnabled] = useState(false);
   const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
+  const [isSessionManagerOpen, setIsSessionManagerOpen] = useState(false);
+  const [isThemePreviewOpen, setIsThemePreviewOpen] = useState(false);
+  const [showAdvancedEditor, setShowAdvancedEditor] = useState(false);
   
   const fullTranscriptRef = useRef<string>('');
   const analyzedTranscriptRef = useRef<string>('');
-  const sessionStartTimeRef = useRef<number>(0);
   
-  const { saveCurrentSession, currentSession } = useSession();
+  const { saveCurrentSession } = useSession();
 
   const handleTranscriptChange = useCallback(async (newTranscript: string) => {
     fullTranscriptRef.current = newTranscript;
     
-    try {
-      await saveCurrentSession({
-        id: currentSession?.id ?? '',
-        transcript: newTranscript,
-        editHistory: [
-          ...(currentSession?.editHistory ?? []),
-          {
-            timestamp: Date.now(),
-            content: newTranscript
-          }
-        ]
-      });
-    } catch (error) {
-      console.error('Error saving transcript changes:', error);
-    }
-  }, [currentSession, saveCurrentSession]);
+    // TODO: Implement transcript editing history when needed
+    // This would require updating the TranscriptSession interface to include edit history
+  }, []);
+
+  const handleLoadSession = useCallback((session: any) => {
+    // Load a session from history
+    setTurns(session.turns || []);
+    setGeminiAnalysis(session.analysis || null);
+    setChatHistory([]);
+    setChatEnabled(!!session.analysis);
+    setIsAnalyzing(false);
+    fullTranscriptRef.current = session.turns?.map((turn: AssemblyAITurn) => turn.transcript).join('\n\n') || '';
+  }, []);
+
+  const handleExportSession = useCallback((session: any) => {
+    // Set the current session data and open export dialog
+    setTurns(session.turns || []);
+    setGeminiAnalysis(session.analysis || null);
+    fullTranscriptRef.current = session.turns?.map((turn: AssemblyAITurn) => turn.transcript).join('\n\n') || '';
+    setIsExportDialogOpen(true);
+  }, []);
 
   const handleNewTurn = useCallback((turn: AssemblyAITurn) => {
     console.log('🎤 New turn received in App:', {
@@ -138,6 +151,25 @@ const AppContent: React.FC = () => {
 
       if(result) {
         setGeminiAnalysis(result);
+        
+        // Update the saved session with analysis results
+        if (turns.length > 0) {
+          const sessionDuration = turns.reduce((total, turn) => {
+            if (turn.words && turn.words.length > 0) {
+              const lastWord = turn.words[turn.words.length - 1];
+              return Math.max(total, lastWord.end);
+            }
+            return total;
+          }, 0);
+
+          saveCurrentSession({
+            name: `Transcript ${new Date().toLocaleString()}`,
+            turns: turns,
+            analysis: result,
+            duration: Math.round(sessionDuration)
+          });
+        }
+        
         // Initialize chat after successful analysis
         const chatPrompt = `Understood. I have analyzed the transcript. The summary is: "${result.summary}". And here are the action items: ${result.actionItems.join(', ') || 'None'}. How can I help you further?`;
 
@@ -157,7 +189,7 @@ const AppContent: React.FC = () => {
       console.log('🔄 Resetting isAnalyzing to false');
       setIsAnalyzing(false);
     }
-  }, [isAnalyzing]);
+  }, [isAnalyzing, saveCurrentSession]);
 
   useEffect(() => {
     // Update the full transcript whenever turns change
@@ -173,8 +205,24 @@ const AppContent: React.FC = () => {
     if (shouldAnalyze) {
         analyzedTranscriptRef.current = newTranscript;
         triggerGeminiAnalysis(newTranscript);
+        
+        // Save session when transcript is completed
+        const sessionDuration = turns.reduce((total, turn) => {
+          if (turn.words && turn.words.length > 0) {
+            const lastWord = turn.words[turn.words.length - 1];
+            return Math.max(total, lastWord.end);
+          }
+          return total;
+        }, 0);
+
+        saveCurrentSession({
+          name: `Transcript ${new Date().toLocaleString()}`,
+          turns: turns,
+          analysis: null, // Will be updated after analysis completes
+          duration: Math.round(sessionDuration)
+        });
     }
-  }, [status, triggerGeminiAnalysis, isAnalyzing]);
+  }, [status, triggerGeminiAnalysis, isAnalyzing, turns, saveCurrentSession]);
   
   const handleToggleListening = () => {
     if (status === 'connected') {
@@ -202,20 +250,6 @@ const AppContent: React.FC = () => {
     } else {
       console.log('❌ No transcript available for manual analysis');
     }
-  };
-
-  // Debug function to test live transcript
-  const handleTestTranscript = () => {
-    console.log('🧪 Testing live transcript...');
-    const testTurn: AssemblyAITurn = {
-      type: 'Turn',
-      turn_order: turns.length + 1,
-      turn_is_formatted: false,
-      end_of_turn: false,
-      transcript: `Test transcript ${Date.now()} - This is a test message to verify live transcript updates.`,
-      words: []
-    };
-    handleNewTurn(testTurn);
   };
 
   const handleSendChatMessage = async (message: string) => {
@@ -252,25 +286,48 @@ const AppContent: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-light-bg dark:bg-gray-900 font-sans p-4 sm:p-6 lg:p-8 flex flex-col text-gray-900 dark:text-gray-200">
-      <header className="w-full max-w-7xl mx-auto mb-6 flex flex-col sm:flex-row justify-between items-center pb-4 border-b border-gray-700 dark:border-gray-700">
+    <div className="min-h-screen bg-theme-primary font-sans p-4 sm:p-6 lg:p-8 flex flex-col text-theme-primary">
+      <header className="w-full max-w-7xl mx-auto mb-6 flex flex-col sm:flex-row justify-between items-center pb-4 border-b border-theme">
         <div className="flex items-center mb-4 sm:mb-0">
           <div className="bg-brand-blue p-2 rounded-lg mr-3">
             <MicIcon className="w-6 h-6 text-white"/>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white tracking-tight">Real-time Audio Intelligence</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-theme-primary tracking-tight">Real-time Audio Intelligence</h1>
           <ThemeToggle />
         </div>
         <div className="flex flex-col sm:flex-row items-center gap-4">
-            <p className="text-gray-400 text-sm">{getStatusText(status)}</p>
+            <p className="text-theme-secondary text-sm">{getStatusText(status)}</p>
             <ControlButton onClick={handleToggleListening} status={status} />
             
-            {/* Debug button for testing - remove in production */}
+            {/* Advanced Editing Button */}
             <button
-              onClick={handleTestTranscript}
-              className="px-3 py-1 bg-yellow-600 hover:bg-yellow-700 text-white rounded text-sm"
+              onClick={() => setShowAdvancedEditor(!showAdvancedEditor)}
+              className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors flex items-center gap-2 ${
+                showAdvancedEditor 
+                  ? 'bg-purple-600 hover:bg-purple-700 text-white' 
+                  : 'bg-gray-600 hover:bg-gray-700 text-white'
+              }`}
             >
-              Test Live Transcript
+              <EditIcon className="w-4 h-4" />
+              {showAdvancedEditor ? 'Hide Editor' : 'Advanced Editing'}
+            </button>
+            
+            {/* Session Manager Button */}
+            <button
+              onClick={() => setIsSessionManagerOpen(true)}
+              className="px-4 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            >
+              <HistoryIcon className="w-4 h-4" />
+              Sessions
+            </button>
+            
+            {/* Theme Preview Button */}
+            <button
+              onClick={() => setIsThemePreviewOpen(true)}
+              className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+            >
+              <PaletteIcon className="w-4 h-4" />
+              Themes
             </button>
             
             {turns.length > 0 && (
@@ -295,77 +352,92 @@ const AppContent: React.FC = () => {
       </header>
 
       <main className="w-full max-w-7xl mx-auto flex-grow grid grid-cols-1 lg:grid-cols-5 gap-8">
-        <div className="lg:col-span-3 h-[85vh] flex flex-col">
-            <TranscriptPanel
+        {showAdvancedEditor && turns.length > 0 ? (
+          <div className="lg:col-span-5">
+            <AdvancedTranscriptEditor 
               turns={turns}
-              interimTranscript={interimTranscript}
-              onTranscriptChange={handleTranscriptChange}
+              onWordsUpdate={(updatedTurns: AssemblyAITurn[]) => {
+                setTurns(updatedTurns);
+                // Update full transcript ref
+                fullTranscriptRef.current = getFullTranscript(updatedTurns);
+              }}
             />
-        </div>
-
-        <aside className="lg:col-span-2 h-[85vh] flex flex-col gap-4 overflow-hidden">
-          <h2 className="text-xl font-semibold text-gray-200 flex items-center gap-2 sticky top-0 bg-gray-900 py-2 z-10">
-            <BrainCircuitIcon className="w-6 h-6 text-brand-blue" />
-            Gemini Analysis
-          </h2>
-          <div className="flex-grow overflow-y-auto pr-2 space-y-4 min-h-0">
-          {isAnalyzing && (
-            <div className="flex items-center justify-center text-gray-400 bg-gray-800/50 p-4 rounded-lg">
-                <HourglassIcon className="w-5 h-5 mr-2 animate-spin" />
-                Analyzing transcript...
-            </div>
-          )}
-          {geminiAnalysis && (
-            <>
-              <AnalysisCard 
-                icon={<SummaryIcon/>} 
-                title="Summary" 
-                content={geminiAnalysis.summary} 
-                isLoading={isAnalyzing}
-              />
-              <AnalysisCard 
-                icon={<CheckCircleIcon/>} 
-                title="Corrected Transcript" 
-                content={geminiAnalysis.correctedTranscript} 
-                isLoading={isAnalyzing}
-              />
-              <AnalysisCard 
-                icon={<ListIcon/>} 
-                title="Action Items" 
-                content={
-                  geminiAnalysis.actionItems.length > 0 ? (
-                    <ul className="space-y-2 bg-gray-700/30 p-4 rounded-lg">
-                      {geminiAnalysis.actionItems.map((item, i) => (
-                        <li key={i} className="flex items-start">
-                          <span className="inline-block w-4 h-4 mt-1 mr-2 text-brand-teal">•</span>
-                          <span>{item}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    'No action items identified.'
-                  )
-                } 
-                isLoading={isAnalyzing}
-              />
-            </>
-          )}
-          
-          {chatEnabled && chatHistory.length > 0 && (
-            <ChatPanel 
-              history={chatHistory}
-              isSending={isChatting}
-              onSendMessage={handleSendChatMessage}
-            />
-          )}
-
-          {!isAnalyzing && !geminiAnalysis && status !== 'connected' && status !== 'connecting' && (
-            <div className="text-center text-gray-500 bg-gray-800/50 p-6 rounded-lg">
-                Analysis will appear here after you stop a recording.
-            </div>
-          )}
           </div>
-        </aside>
+        ) : (
+          <>
+            <div className="lg:col-span-3 h-[85vh] flex flex-col">
+                <TranscriptPanel
+                  turns={turns}
+                  interimTranscript={interimTranscript}
+                  onTranscriptChange={handleTranscriptChange}
+                />
+            </div>
+
+            <aside className="lg:col-span-2 h-[85vh] flex flex-col gap-4 overflow-hidden">
+              <h2 className="text-xl font-semibold text-gray-200 flex items-center gap-2 sticky top-0 bg-gray-900 py-2 z-10">
+                <BrainCircuitIcon className="w-6 h-6 text-brand-blue" />
+                Gemini Analysis
+              </h2>
+              <div className="flex-grow overflow-y-auto pr-2 space-y-4 min-h-0">
+                {isAnalyzing && (
+                  <div className="flex items-center justify-center text-gray-400 bg-gray-800/50 p-4 rounded-lg">
+                      <HourglassIcon className="w-5 h-5 mr-2 animate-spin" />
+                      Analyzing transcript...
+                  </div>
+                )}
+                {geminiAnalysis && (
+                  <>
+                    <AnalysisCard 
+                      icon={<SummaryIcon/>} 
+                      title="Summary" 
+                      content={geminiAnalysis.summary} 
+                      isLoading={isAnalyzing}
+                    />
+                    <AnalysisCard 
+                      icon={<CheckCircleIcon/>} 
+                      title="Corrected Transcript" 
+                      content={geminiAnalysis.correctedTranscript} 
+                      isLoading={isAnalyzing}
+                    />
+                    <AnalysisCard 
+                      icon={<ListIcon/>} 
+                      title="Action Items" 
+                      content={
+                        geminiAnalysis.actionItems.length > 0 ? (
+                          <ul className="space-y-2 bg-gray-700/30 p-4 rounded-lg">
+                            {geminiAnalysis.actionItems.map((item, i) => (
+                              <li key={i} className="flex items-start">
+                                <span className="inline-block w-4 h-4 mt-1 mr-2 text-brand-teal">•</span>
+                                <span>{item}</span>
+                              </li>
+                            ))}
+                          </ul>
+                        ) : (
+                          'No action items identified.'
+                        )
+                      } 
+                      isLoading={isAnalyzing}
+                    />
+                  </>
+                )}
+                
+                {chatEnabled && chatHistory.length > 0 && (
+                  <ChatPanel 
+                    history={chatHistory}
+                    isSending={isChatting}
+                    onSendMessage={handleSendChatMessage}
+                  />
+                )}
+
+                {!isAnalyzing && !geminiAnalysis && status !== 'connected' && status !== 'connecting' && (
+                  <div className="text-center text-gray-500 bg-gray-800/50 p-6 rounded-lg">
+                      Analysis will appear here after you stop a recording.
+                  </div>
+                )}
+              </div>
+            </aside>
+          </>
+        )}
       </main>
 
       <ExportDialog
@@ -374,6 +446,18 @@ const AppContent: React.FC = () => {
         transcript={fullTranscriptRef.current}
         analysis={geminiAnalysis}
         turns={turns}
+      />
+
+      <SessionManager
+        isOpen={isSessionManagerOpen}
+        onClose={() => setIsSessionManagerOpen(false)}
+        onLoadSession={handleLoadSession}
+        onExportSession={handleExportSession}
+      />
+
+      <ThemePreview
+        isOpen={isThemePreviewOpen}
+        onClose={() => setIsThemePreviewOpen(false)}
       />
 
       <ToastContainer position="bottom-right" />

@@ -1,18 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useTranscriptHistory } from '../hooks/useTranscriptHistory';
+import { AdvancedTranscriptEditor } from './AdvancedTranscriptEditor';
+import type { AssemblyAITurn } from '../types';
 
 interface EditableTranscriptProps {
   initialTranscript: string;
+  turns?: AssemblyAITurn[];
   onSave?: (transcript: string) => void;
+  onWordsUpdate?: (updatedTurns: AssemblyAITurn[]) => void;
 }
 
 export const EditableTranscript: React.FC<EditableTranscriptProps> = ({
   initialTranscript,
-  onSave
+  turns,
+  onSave,
+  onWordsUpdate
 }) => {
   console.log('📝 EditableTranscript rendered with:', {
     initialTranscriptLength: initialTranscript.length,
-    initialTranscriptPreview: initialTranscript.substring(0, 100) + (initialTranscript.length > 100 ? '...' : '')
+    initialTranscriptPreview: initialTranscript.substring(0, 100) + (initialTranscript.length > 100 ? '...' : ''),
+    hasTurns: !!turns,
+    turnsCount: turns?.length || 0
   });
 
   const {
@@ -26,15 +34,19 @@ export const EditableTranscript: React.FC<EditableTranscriptProps> = ({
   
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [editMode, setEditMode] = useState<'basic' | 'advanced'>('basic');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Determine if advanced editing is available
+  const hasWordLevelData = turns && turns.some(turn => turn.words && turn.words.length > 0);
 
   // Auto-resize textarea
   useEffect(() => {
-    if (textareaRef.current && isEditing) {
+    if (textareaRef.current && isEditing && editMode === 'basic') {
       textareaRef.current.style.height = 'auto';
       textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
     }
-  }, [transcript, isEditing]);
+  }, [transcript, isEditing, editMode]);
 
   // Auto-save debounce
   useEffect(() => {
@@ -92,7 +104,34 @@ export const EditableTranscript: React.FC<EditableTranscriptProps> = ({
           >
             {isEditing ? 'Done' : 'Edit'}
           </button>
-          {isEditing && (
+          
+          {/* Mode Toggle for Advanced Editing */}
+          {hasWordLevelData && (
+            <div className="flex bg-gray-100 dark:bg-gray-700 rounded p-1">
+              <button
+                onClick={() => setEditMode('basic')}
+                className={`px-2 py-1 text-xs rounded ${
+                  editMode === 'basic'
+                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100'
+                    : 'text-gray-600 dark:text-gray-300'
+                }`}
+              >
+                Basic
+              </button>
+              <button
+                onClick={() => setEditMode('advanced')}
+                className={`px-2 py-1 text-xs rounded ${
+                  editMode === 'advanced'
+                    ? 'bg-white dark:bg-gray-600 text-gray-900 dark:text-gray-100'
+                    : 'text-gray-600 dark:text-gray-300'
+                }`}
+              >
+                Word-level
+              </button>
+            </div>
+          )}
+          
+          {isEditing && editMode === 'basic' && (
             <>
               <button
                 onClick={undo}
@@ -119,7 +158,15 @@ export const EditableTranscript: React.FC<EditableTranscriptProps> = ({
       </div>
 
       {/* Transcript Content */}
-      {isEditing ? (
+      {editMode === 'advanced' && hasWordLevelData && turns ? (
+        <AdvancedTranscriptEditor
+          turns={turns}
+          onWordsUpdate={onWordsUpdate}
+          readOnly={!isEditing}
+          showConfidence={true}
+          showTimestamps={false}
+        />
+      ) : isEditing ? (
         <textarea
           ref={textareaRef}
           value={transcript}

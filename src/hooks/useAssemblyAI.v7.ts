@@ -63,24 +63,13 @@ export const useAssemblyAI = ({ apiKey, onTurn }: UseAssemblyAIProps) => {
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
       const message: any = JSON.parse(event.data);
-      console.log('🔍 Raw message received:', message);
-      console.log('🔍 Message type:', message.type);
       
       if (message.type === 'Turn') {
-        console.log('📝 Turn message:', {
-          turn_order: message.turn_order,
-          transcript: message.transcript,
-          end_of_turn: message.end_of_turn,
-          turn_is_formatted: message.turn_is_formatted,
-          transcript_length: message.transcript?.length || 0
-        });
         onTurn(message as AssemblyAITurn);
       } else if (message.type === 'Begin') {
-        console.log('🎬 AssemblyAI session started:', message.id);
+        console.log('🎬 AssemblyAI session started');
       } else if (message.type === 'Termination') {
-        console.log('🔚 AssemblyAI session terminated.');
-      } else {
-        console.log('❓ Unknown message type:', message.type, message);
+        console.log('🔚 AssemblyAI session terminated');
       }
     } catch (error) {
       console.error('❌ Error parsing message from AssemblyAI:', error);
@@ -141,7 +130,6 @@ export const useAssemblyAI = ({ apiKey, onTurn }: UseAssemblyAIProps) => {
     // This function concatenates and sends the buffered audio.
     const sendAudioBuffer = () => {
       if (audioBuffer.length === 0 || ws.current?.readyState !== WebSocket.OPEN) {
-          console.log('Cannot send audio buffer:', audioBuffer.length === 0 ? 'empty buffer' : 'websocket not open');
           return;
       }
       const totalLength = audioBuffer.reduce((sum, b) => sum + b.length, 0);
@@ -149,7 +137,6 @@ export const useAssemblyAI = ({ apiKey, onTurn }: UseAssemblyAIProps) => {
       // Only send if we have at least 50ms of audio (800 samples at 16kHz)
       const MIN_SAMPLES = 800; // 50ms * 16kHz
       if (totalLength < MIN_SAMPLES) {
-        console.log('Buffer too small to send:', totalLength, 'samples (need at least', MIN_SAMPLES, ')');
         return;
       }
 
@@ -159,7 +146,6 @@ export const useAssemblyAI = ({ apiKey, onTurn }: UseAssemblyAIProps) => {
         concatenatedBuffer.set(buffer, offset);
         offset += buffer.length;
       }
-      console.log('Sending audio buffer:', totalLength, 'samples');
       ws.current.send(concatenatedBuffer.buffer);
       audioBuffer.length = 0; // Clear the buffer after sending
     };
@@ -236,7 +222,7 @@ export const useAssemblyAI = ({ apiKey, onTurn }: UseAssemblyAIProps) => {
         // When the worklet sends PCM data, buffer it.
         audioWorkletNode.current.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
           const pcmData = new Int16Array(event.data);
-          console.log('🎵 Received audio data:', pcmData.length, 'samples');
+          console.log('🎵 Audio data received:', pcmData.length, 'samples');
           audioBuffer.push(pcmData);
 
           // If the buffer reaches a certain size (minimum 50ms), send it immediately.

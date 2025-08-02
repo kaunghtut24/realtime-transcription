@@ -44,6 +44,7 @@ export const TranscriptPanel: React.FC<TranscriptPanelProps> = ({
       <div ref={scrollRef} className="flex-grow p-4 overflow-y-auto">
         <EditableTranscript
           initialTranscript={fullTranscript}
+          turns={turns}
           onSave={onTranscriptChange}
         />
       </div>
