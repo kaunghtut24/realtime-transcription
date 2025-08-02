@@ -5,7 +5,35 @@ This guide covers the deployment process for both development and production env
 ## Table of Contents
 - [Environment Setup](#environment-setup)
 - [Development Deployment](#development-deployment)
-- [Production Deployment](#production-deployment)
+6. **Data Management**
+   - **Session Storage**: Local data persists in IndexedDB
+   - **Theme Preferences**: Saved in localStorage
+   - **Edit History**: Tracked for transcript modifications
+   - **Export Capabilities**: PDF, DOCX, SRT, VTT formats supported
+
+7. **Browser Storage Limits**
+   - IndexedDB storage can handle large numbers of sessions
+   - Automatic cleanup mechanisms prevent storage overflow
+   - Export capabilities allow data backup and portability
+
+## Performance Considerations
+
+### Frontend Optimization
+- **Code Splitting**: Vite automatically handles code splitting for optimal loading
+- **Asset Optimization**: CSS and JavaScript minification in production builds
+- **Image Optimization**: SVG icons for scalable, lightweight graphics
+- **Memory Management**: Proper cleanup of WebSocket connections and audio contexts
+
+### Backend Optimization
+- **API Caching**: Consider implementing Redis for API response caching
+- **Rate Limiting**: Implement rate limiting for API endpoints
+- **Database Optimization**: For production, consider PostgreSQL for session storage
+- **CDN Integration**: Use CDN for static assets and API responses
+
+### Real-time Performance
+- **WebSocket Management**: Automatic reconnection and error handling
+- **Audio Processing**: Efficient audio worklet processing for real-time transcription
+- **State Management**: Optimized React state updates for smooth UI performanceroduction Deployment](#production-deployment)
 - [Environment Variables](#environment-variables)
 - [CORS Configuration](#cors-configuration)
 - [New Features](#new-features)
@@ -258,7 +286,6 @@ Expanded from 2 to 6 themes with live preview:
    - Never commit API keys to version control
    - Use environment variables for all sensitive data
    - Rotate API keys periodically
-   - Server-side proxy prevents client-side API key exposure
 
 2. **CORS Security**
    - Strictly limit allowed origins in production
@@ -266,7 +293,7 @@ Expanded from 2 to 6 themes with live preview:
    - Configure proper SSL/TLS certificates
 
 3. **SSL/TLS**
-   - Always use HTTPS in production (required for microphone access)
+   - Always use HTTPS in production
    - Configure secure SSL/TLS settings
    - Keep certificates up to date
 
@@ -275,40 +302,10 @@ Expanded from 2 to 6 themes with live preview:
    - Log errors securely
    - Implement proper rate limiting
 
-5. **Browser Security**
-   - Microphone permissions properly handled
-   - Secure WebSocket connections (WSS)
-   - Content Security Policy headers recommended
-
-6. **Data Management**
-   - **Session Storage**: Local data persists in IndexedDB
-   - **Theme Preferences**: Saved in localStorage
-   - **Edit History**: Tracked for transcript modifications
-   - **Export Capabilities**: PDF, DOCX, SRT, VTT formats supported
-
-7. **Browser Storage Limits**
-   - IndexedDB storage can handle large numbers of sessions
-   - Automatic cleanup mechanisms prevent storage overflow
-   - Export capabilities allow data backup and portability
-
-## Performance Considerations
-
-### Frontend Optimization
-- **Code Splitting**: Vite automatically handles code splitting for optimal loading
-- **Asset Optimization**: CSS and JavaScript minification in production builds
-- **Image Optimization**: SVG icons for scalable, lightweight graphics
-- **Memory Management**: Proper cleanup of WebSocket connections and audio contexts
-
-### Backend Optimization
-- **API Caching**: Consider implementing Redis for API response caching
-- **Rate Limiting**: Implement rate limiting for API endpoints
-- **Database Optimization**: For production, consider PostgreSQL for session storage
-- **CDN Integration**: Use CDN for static assets and API responses
-
-### Real-time Performance
-- **WebSocket Management**: Automatic reconnection and error handling
-- **Audio Processing**: Efficient audio worklet processing for real-time transcription
-- **State Management**: Optimized React state updates for smooth UI performance
+5. **Monitoring**
+   - Set up application monitoring
+   - Configure error alerting
+   - Monitor API usage and costs
 
 ## Troubleshooting
 
