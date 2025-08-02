@@ -1,18 +1,32 @@
 /// <reference types="vite/client" />
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { useAssemblyAI } from './hooks/useAssemblyAI';
+import { ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+import { useAssemblyAI } from './hooks/useAssemblyAI.v7';
 import { analyzeTranscript, sendChatMessage } from './services/geminiService';
+import { useSession } from './contexts/SessionContext';
 import type { AssemblyAITurn, GeminiAnalysis, ConnectionStatus, ChatMessage } from './types';
 import { ControlButton } from './components/ControlButton';
 import { TranscriptPanel } from './components/TranscriptPanel';
 import { AnalysisCard } from './components/AnalysisCard';
 import { ChatPanel } from './components/ChatPanel';
-import { MicIcon, SummaryIcon, CheckCircleIcon, ListIcon, BrainCircuitIcon, HourglassIcon } from './components/icons';
+import { ExportDialog } from './components/ExportDialog';
+import { 
+  MicIcon, 
+  SummaryIcon, 
+  CheckCircleIcon, 
+  ListIcon, 
+  BrainCircuitIcon, 
+  HourglassIcon,
+  DownloadIcon
+} from './components/icons';
+import { ThemeToggle } from './components/ThemeToggle';
+import { ThemeProvider } from './contexts/ThemeContext';
 
 const ASSEMBLYAI_API_KEY = import.meta.env.VITE_ASSEMBLYAI_API_KEY || "";
 
-const App: React.FC = () => {
+const AppContent: React.FC = () => {
   const [turns, setTurns] = useState<AssemblyAITurn[]>([]);
   const [interimTranscript, setInterimTranscript] = useState('');
   const [geminiAnalysis, setGeminiAnalysis] = useState<GeminiAnalysis | null>(null);
@@ -20,17 +34,42 @@ const App: React.FC = () => {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [isChatting, setIsChatting] = useState(false);
   const [chatEnabled, setChatEnabled] = useState(false);
+  const [isExportDialogOpen, setIsExportDialogOpen] = useState(false);
   
   const fullTranscriptRef = useRef<string>('');
-  const analyzedTranscriptRef = useRef<string>(''); // Track the last analyzed transcript
+  const analyzedTranscriptRef = useRef<string>('');
+  const sessionStartTimeRef = useRef<number>(0);
+  
+  const { saveCurrentSession, currentSession } = useSession();
+
+  const handleTranscriptChange = useCallback(async (newTranscript: string) => {
+    fullTranscriptRef.current = newTranscript;
+    
+    try {
+      await saveCurrentSession({
+        id: currentSession?.id ?? '',
+        transcript: newTranscript,
+        editHistory: [
+          ...(currentSession?.editHistory ?? []),
+          {
+            timestamp: Date.now(),
+            content: newTranscript
+          }
+        ]
+      });
+    } catch (error) {
+      console.error('Error saving transcript changes:', error);
+    }
+  }, [currentSession, saveCurrentSession]);
 
   const handleNewTurn = useCallback((turn: AssemblyAITurn) => {
-    console.log('🎤 New turn received:', {
+    console.log('🎤 New turn received in App:', {
       turn_order: turn.turn_order,
       turn_is_formatted: turn.turn_is_formatted,
       end_of_turn: turn.end_of_turn,
       transcript: turn.transcript,
-      transcript_length: turn.transcript.length
+      transcript_length: turn.transcript.length,
+      words_count: turn.words?.length || 0
     });
 
     setTurns(prevTurns => {
@@ -38,16 +77,19 @@ const App: React.FC = () => {
       if (existingTurnIndex !== -1) {
         const newTurns = [...prevTurns];
         newTurns[existingTurnIndex] = turn;
-        console.log('🔄 Updated existing turn', turn.turn_order);
+        console.log('🔄 Updated existing turn', turn.turn_order, 'New transcript:', turn.transcript);
         return newTurns;
       }
-      console.log('➕ Added new turn', turn.turn_order);
+      console.log('➕ Added new turn', turn.turn_order, 'Transcript:', turn.transcript);
       return [...prevTurns, turn];
     });
 
+    // Update interim transcript for unformatted, non-final turns
     if (!turn.turn_is_formatted && !turn.end_of_turn) {
+        console.log('📝 Setting interim transcript:', turn.transcript);
         setInterimTranscript(turn.transcript);
     } else {
+        console.log('🔄 Clearing interim transcript');
         setInterimTranscript('');
     }
   }, []);
@@ -118,28 +160,19 @@ const App: React.FC = () => {
   }, [isAnalyzing]);
 
   useEffect(() => {
-    console.log('🔄 Status changed to:', status);
-    console.log('📄 Current transcript in ref:', fullTranscriptRef.current);
-    console.log('🔍 Is currently analyzing:', isAnalyzing);
-    console.log('📝 Last analyzed transcript:', analyzedTranscriptRef.current);
+    // Update the full transcript whenever turns change
+    const newTranscript = turns.map(turn => turn.transcript).join('\n\n');
+    fullTranscriptRef.current = newTranscript;
 
     const shouldAnalyze = 
       status === 'closed' && 
-      fullTranscriptRef.current && 
+      newTranscript.trim().length > 0 && 
       !isAnalyzing && 
-      fullTranscriptRef.current !== analyzedTranscriptRef.current;
+      newTranscript !== analyzedTranscriptRef.current;
 
     if (shouldAnalyze) {
-        console.log('✅ Conditions met - triggering Gemini analysis');
-        analyzedTranscriptRef.current = fullTranscriptRef.current; // Mark this transcript as analyzed
-        triggerGeminiAnalysis(fullTranscriptRef.current);
-    } else {
-        console.log('❌ Conditions not met for analysis:', {
-          statusIsClosed: status === 'closed',
-          hasTranscript: !!fullTranscriptRef.current,
-          notAnalyzing: !isAnalyzing,
-          isDifferentTranscript: fullTranscriptRef.current !== analyzedTranscriptRef.current
-        });
+        analyzedTranscriptRef.current = newTranscript;
+        triggerGeminiAnalysis(newTranscript);
     }
   }, [status, triggerGeminiAnalysis, isAnalyzing]);
   
@@ -171,11 +204,25 @@ const App: React.FC = () => {
     }
   };
 
+  // Debug function to test live transcript
+  const handleTestTranscript = () => {
+    console.log('🧪 Testing live transcript...');
+    const testTurn: AssemblyAITurn = {
+      type: 'Turn',
+      turn_order: turns.length + 1,
+      turn_is_formatted: false,
+      end_of_turn: false,
+      transcript: `Test transcript ${Date.now()} - This is a test message to verify live transcript updates.`,
+      words: []
+    };
+    handleNewTurn(testTurn);
+  };
+
   const handleSendChatMessage = async (message: string) => {
     if (!chatEnabled || isChatting) return;
 
     setIsChatting(true);
-    const newUserMessage = { role: 'user', text: message };
+    const newUserMessage: ChatMessage = { role: 'user', text: message };
     setChatHistory(prev => [...prev, newUserMessage]);
 
     try {
@@ -205,32 +252,55 @@ const App: React.FC = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-900 font-sans p-4 sm:p-6 lg:p-8 flex flex-col">
-      <header className="w-full max-w-7xl mx-auto mb-6 flex flex-col sm:flex-row justify-between items-center pb-4 border-b border-gray-700">
+    <div className="min-h-screen bg-light-bg dark:bg-gray-900 font-sans p-4 sm:p-6 lg:p-8 flex flex-col text-gray-900 dark:text-gray-200">
+      <header className="w-full max-w-7xl mx-auto mb-6 flex flex-col sm:flex-row justify-between items-center pb-4 border-b border-gray-700 dark:border-gray-700">
         <div className="flex items-center mb-4 sm:mb-0">
           <div className="bg-brand-blue p-2 rounded-lg mr-3">
             <MicIcon className="w-6 h-6 text-white"/>
           </div>
-          <h1 className="text-2xl sm:text-3xl font-bold text-white tracking-tight">Real-time Audio Intelligence</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold text-gray-900 dark:text-white tracking-tight">Real-time Audio Intelligence</h1>
+          <ThemeToggle />
         </div>
         <div className="flex flex-col sm:flex-row items-center gap-4">
             <p className="text-gray-400 text-sm">{getStatusText(status)}</p>
             <ControlButton onClick={handleToggleListening} status={status} />
+            
+            {/* Debug button for testing - remove in production */}
+            <button
+              onClick={handleTestTranscript}
+              className="px-3 py-1 bg-yellow-600 hover:bg-yellow-700 text-white rounded text-sm"
+            >
+              Test Live Transcript
+            </button>
+            
             {turns.length > 0 && (
-              <button
-                onClick={handleManualAnalysis}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors"
-                disabled={isAnalyzing}
-              >
-                {isAnalyzing ? 'Analyzing...' : 'Manual Analysis'}
-              </button>
+              <>
+                <button
+                  onClick={handleManualAnalysis}
+                  className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-lg text-sm font-medium transition-colors"
+                  disabled={isAnalyzing}
+                >
+                  {isAnalyzing ? 'Analyzing...' : 'Manual Analysis'}
+                </button>
+                <button
+                  onClick={() => setIsExportDialogOpen(true)}
+                  className="px-4 py-2 bg-brand-teal hover:bg-teal-700 text-white rounded-lg text-sm font-medium transition-colors flex items-center gap-2"
+                >
+                  <DownloadIcon className="w-4 h-4" />
+                  Export
+                </button>
+              </>
             )}
         </div>
       </header>
 
       <main className="w-full max-w-7xl mx-auto flex-grow grid grid-cols-1 lg:grid-cols-5 gap-8">
         <div className="lg:col-span-3 h-[85vh] flex flex-col">
-            <TranscriptPanel turns={turns} interimTranscript={interimTranscript} />
+            <TranscriptPanel
+              turns={turns}
+              interimTranscript={interimTranscript}
+              onTranscriptChange={handleTranscriptChange}
+            />
         </div>
 
         <aside className="lg:col-span-2 h-[85vh] flex flex-col gap-4 overflow-hidden">
@@ -297,7 +367,25 @@ const App: React.FC = () => {
           </div>
         </aside>
       </main>
+
+      <ExportDialog
+        isOpen={isExportDialogOpen}
+        onClose={() => setIsExportDialogOpen(false)}
+        transcript={fullTranscriptRef.current}
+        analysis={geminiAnalysis}
+        turns={turns}
+      />
+
+      <ToastContainer position="bottom-right" />
     </div>
+  );
+};
+
+const App: React.FC = () => {
+  return (
+    <ThemeProvider>
+      <AppContent />
+    </ThemeProvider>
   );
 };
 

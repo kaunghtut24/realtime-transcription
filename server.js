@@ -3,12 +3,9 @@ import cors from 'cors';
 import fetch from 'node-fetch';
 import dotenv from 'dotenv';
 
-// Load environment variables based on NODE_ENV
-const envFile = process.env.NODE_ENV === 'production' 
-  ? '.env.production.server' 
-  : '.env.development.server';
-
-dotenv.config({ path: envFile });
+// Load environment variables
+dotenv.config({ path: '.env.local' }); // Load local overrides first
+dotenv.config({ path: process.env.NODE_ENV === 'production' ? '.env.production.server' : '.env.development.server' });
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -18,19 +15,13 @@ const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(',') 
   : [];
 
-// Configure CORS based on environment
+// Configure CORS
 const corsOptions = {
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) === -1) {
-      const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-      return callback(new Error(msg), false);
-    }
-    return callback(null, true);
-  },
-  methods: ['GET', 'POST'],
+  origin: process.env.NODE_ENV === 'production'
+    ? allowedOrigins
+    : ['http://localhost:5173', 'http://127.0.0.1:5173'], // Vite default development ports
+  credentials: true,
+  methods: ['GET', 'POST', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
   credentials: true,
   optionsSuccessStatus: 204
@@ -41,11 +32,20 @@ app.use(express.json());
 
 // Proxy endpoint for AssemblyAI token generation
 app.post('/api/assemblyai/token', async (req, res) => {
+  console.log('📥 Received AssemblyAI token request');
+  
   try {
     const apiKey = process.env.VITE_ASSEMBLYAI_API_KEY;
-
+    const authHeader = req.headers.authorization;
+    
     if (!apiKey) {
-      return res.status(500).json({ error: 'AssemblyAI API key not configured' });
+      console.log('❌ Server AssemblyAI API key not configured');
+      return res.status(500).json({ error: 'AssemblyAI API key not configured on server' });
+    }
+    
+    if (!authHeader) {
+      console.log('❌ Missing client Authorization header');
+      return res.status(401).json({ error: 'Client API key required' });
     }
 
     // Use GET request with query parameters as per AssemblyAI API documentation
@@ -69,6 +69,7 @@ app.post('/api/assemblyai/token', async (req, res) => {
     }
 
     const data = await response.json();
+    console.log('✅ Successfully generated AssemblyAI token');
     res.json(data);
   } catch (error) {
     console.error('Error proxying token request:', error);

@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback } from 'react';
-import type { AssemblyAITurn, ConnectionStatus, AssemblyAIMessage } from '../types';
+import type { AssemblyAITurn, ConnectionStatus } from '../types';
 
 interface UseAssemblyAIProps {
   apiKey: string;
@@ -7,8 +7,6 @@ interface UseAssemblyAIProps {
 }
 
 const SAMPLE_RATE = 16000;
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
-const TOKEN_API_ENDPOINT = `${API_URL}/assemblyai/token`;
 const WS_API_BASE_URL = import.meta.env.VITE_WS_API_URL || 'wss://streaming.assemblyai.com/v3/ws';
 
 // The AudioWorkletProcessor code is defined as a string to be loaded as a Blob.
@@ -50,12 +48,12 @@ class RecorderProcessor extends AudioWorkletProcessor {
     return true;
   }
 }
+
 registerProcessor('recorder-processor', RecorderProcessor);
 `;
 
 export const useAssemblyAI = ({ apiKey, onTurn }: UseAssemblyAIProps) => {
   const [status, setStatus] = useState<ConnectionStatus>('idle');
-  
   const ws = useRef<WebSocket | null>(null);
   const audioContext = useRef<AudioContext | null>(null);
   const audioWorkletNode = useRef<AudioWorkletNode | null>(null);
@@ -64,16 +62,29 @@ export const useAssemblyAI = ({ apiKey, onTurn }: UseAssemblyAIProps) => {
 
   const handleMessage = useCallback((event: MessageEvent) => {
     try {
-      const message: AssemblyAIMessage = JSON.parse(event.data);
+      const message: any = JSON.parse(event.data);
+      console.log('🔍 Raw message received:', message);
+      console.log('🔍 Message type:', message.type);
+      
       if (message.type === 'Turn') {
-        onTurn(message);
+        console.log('📝 Turn message:', {
+          turn_order: message.turn_order,
+          transcript: message.transcript,
+          end_of_turn: message.end_of_turn,
+          turn_is_formatted: message.turn_is_formatted,
+          transcript_length: message.transcript?.length || 0
+        });
+        onTurn(message as AssemblyAITurn);
       } else if (message.type === 'Begin') {
-        console.log('AssemblyAI session started:', message.id);
+        console.log('🎬 AssemblyAI session started:', message.id);
       } else if (message.type === 'Termination') {
-        console.log('AssemblyAI session terminated.');
+        console.log('🔚 AssemblyAI session terminated.');
+      } else {
+        console.log('❓ Unknown message type:', message.type, message);
       }
     } catch (error) {
-      console.error('Error parsing message from AssemblyAI:', error);
+      console.error('❌ Error parsing message from AssemblyAI:', error);
+      console.error('❌ Raw event data:', event.data);
     }
   }, [onTurn]);
 
@@ -103,10 +114,9 @@ export const useAssemblyAI = ({ apiKey, onTurn }: UseAssemblyAIProps) => {
     }
   }, []);
 
-  const handleClose = useCallback(() => {
-    console.log('🔌 WebSocket closed');
-    cleanupResources(true); // Skip WebSocket cleanup since it's already closing
-    console.log('🔄 Setting final status');
+  const handleClose = useCallback((event: CloseEvent) => {
+    console.log('WebSocket closed with code:', event.code, 'reason:', event.reason);
+    cleanupResources(true);
     setStatus('closed');
   }, [cleanupResources]);
   
@@ -162,16 +172,16 @@ export const useAssemblyAI = ({ apiKey, onTurn }: UseAssemblyAIProps) => {
     bufferSendInterval.current = window.setInterval(sendAudioBuffer, 200);
 
     try {
-      // Option 1: Use temporary token (requires server proxy)
-      // Comment out the try-catch block below and uncomment the direct authentication method for Option 2
+      // Get temporary token from server (recommended approach for production)
+      console.log('Getting temporary token from server...');
       
-      const tokenResponse = await fetch(TOKEN_API_ENDPOINT, {
+      const tokenResponse = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3001/api'}/assemblyai/token`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': apiKey  // Pass the API key to the server
         },
-        body: JSON.stringify({ expires_in: 600 })
+        body: JSON.stringify({ expires_in_seconds: 600 })
       });
       
       if (!tokenResponse.ok) {
@@ -182,17 +192,20 @@ export const useAssemblyAI = ({ apiKey, onTurn }: UseAssemblyAIProps) => {
       const { token } = await tokenResponse.json();
       if (!token) throw new Error("Temporary token not found in AssemblyAI response.");
 
-      const wsUrl = `${WS_API_BASE_URL}?token=${token}&sample_rate=${SAMPLE_RATE}&encoding=pcm_s16le&format_turns=true`;
+      const params = new URLSearchParams({
+        token: token,
+        sample_rate: SAMPLE_RATE.toString(),
+        encoding: 'pcm_s16le',
+        format_turns: 'true'
+      });
       
-      // Option 2: Direct API key authentication (no server needed)
-      // Uncomment the lines below and comment out the token approach above
-      // const wsUrl = `${WS_API_BASE_URL}?sample_rate=${SAMPLE_RATE}&encoding=pcm_s16le&format_turns=true`;
+      const wsUrl = `${WS_API_BASE_URL}?${params.toString()}`;
+      console.log('Connecting to AssemblyAI with temporary token...');
       
       audioStream.current = await navigator.mediaDevices.getUserMedia({ audio: true });
-      ws.current = new WebSocket(wsUrl);
       
-      // For Option 2 (direct authentication), uncomment the line below
-      // ws.current = new WebSocket(wsUrl, [], { headers: { 'Authorization': apiKey } });
+      // Create WebSocket connection
+      ws.current = new WebSocket(wsUrl);
       
       ws.current.onmessage = handleMessage;
       ws.current.onerror = handleError;
@@ -223,14 +236,14 @@ export const useAssemblyAI = ({ apiKey, onTurn }: UseAssemblyAIProps) => {
         // When the worklet sends PCM data, buffer it.
         audioWorkletNode.current.port.onmessage = (event: MessageEvent<ArrayBuffer>) => {
           const pcmData = new Int16Array(event.data);
-          console.log('Received audio data:', pcmData.length, 'samples');
+          console.log('🎵 Received audio data:', pcmData.length, 'samples');
           audioBuffer.push(pcmData);
 
           // If the buffer reaches a certain size (minimum 50ms), send it immediately.
           const MIN_SAMPLES_PER_BUFFER = 800; // 50ms * 16kHz (minimum required by AssemblyAI)
           const currentSampleCount = audioBuffer.reduce((sum, b) => sum + b.length, 0);
           if (currentSampleCount >= MIN_SAMPLES_PER_BUFFER) {
-            console.log('Sending audio buffer with', currentSampleCount, 'samples');
+            console.log('🚀 Triggering immediate send with', currentSampleCount, 'samples');
             sendAudioBuffer();
           }
         };

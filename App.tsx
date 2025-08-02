@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import type { Chat } from '@google/genai';
-import { useAssemblyAI } from './hooks/useAssemblyAI';
+import { useAssemblyAI } from './hooks/useAssemblyAI.v3';
 import { analyzeTranscript, ai } from './services/geminiService';
 import type { AssemblyAITurn, GeminiAnalysis, ConnectionStatus, ChatMessage } from './types';
 import { ControlButton } from './components/ControlButton';

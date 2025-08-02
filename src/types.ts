@@ -43,7 +43,19 @@ export interface GeminiAnalysis {
 
 export type ConnectionStatus = 'idle' | 'connecting' | 'connected' | 'closing' | 'closed' | 'error';
 
-export interface ChatMessage {
-  role: 'user' | 'model';
-  text: string;
+export interface TranscriptSession {
+  id: string;
+  transcript: string;
+  startTime: number;
+  endTime?: number;
+  analysis?: GeminiAnalysis;
+  duration?: number;
+  editHistory?: {
+    timestamp: number;
+    content: string;
+  }[];
+}
+
+export interface TranscriptSessionUpdate extends Partial<TranscriptSession> {
+  id: string;
 }
